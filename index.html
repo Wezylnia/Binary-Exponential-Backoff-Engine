@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSMA/CD Profesyonel Simülatör</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --border: #e5e7eb;
+
+            --ev-tx: #10b981;
+            --ev-coll: #ef4444;
+            --ev-wait: #f59e0b;
+            --ev-sys: #9ca3af;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 30px 20px;
+            color: var(--text-main);
+        }
+
+        h1, h2, h3 { margin: 0 0 15px 0; font-weight: 600; color: #111827; }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            border: 1px solid var(--border);
+        }
+
+        /* Table Styles */
+        .table-container { overflow-x: auto; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 600px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background-color: #f9fafb; font-weight: 500; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        td input {
+            width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+            border-radius: 6px; font-family: inherit; font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+        td input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 10px 18px; font-size: 0.95rem; font-weight: 500;
+            border: none; border-radius: 8px; cursor: pointer;
+            transition: all 0.2s ease; font-family: inherit; color: white;
+        }
+        .btn-primary { background-color: var(--primary); box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
+        .btn-primary:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
+        .btn-danger { background-color: var(--danger); padding: 8px 12px; font-size: 0.85rem; border-radius: 6px; }
+        .btn-danger:hover { background-color: var(--danger-hover); }
+        .btn-start {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            font-size: 1.1rem; padding: 12px 24px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+        }
+        .btn-start:hover { box-shadow: 0 6px 8px rgba(16, 185, 129, 0.4); transform: translateY(-2px); }
+        .btn-export { background-color: #6366f1; box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3); }
+        .btn-export:hover { background-color: #4f46e5; transform: translateY(-1px); }
+
+        .controls { display: flex; gap: 15px; align-items: center; margin-top: 10px; }
+
+        /* KPI Summaries */
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px;
+        }
+        .kpi-card {
+            background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 15px;
+            display: flex; flex-direction: column; gap: 5px; border-left: 4px solid var(--primary);
+        }
+        .kpi-title { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+        .kpi-value { font-size: 1.5rem; font-weight: 700; color: #111827; }
+
+        /* Canvas Wrapper */
+        .canvas-wrapper { position: relative; width: 100%; overflow-x: auto; background: white; border-radius: 8px; border: 1px solid var(--border); }
+        canvas { display: block; cursor: crosshair; }
+
+        /* Legend */
+        .legend { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px; font-size: 0.9rem; }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-color { width: 14px; height: 14px; border-radius: 3px; }
+
+        /* Tooltip */
+        #tooltip {
+            position: fixed; background: rgba(17, 24, 39, 0.95); color: #f9fafb;
+            padding: 12px; border-radius: 8px; font-size: 0.85rem; pointer-events: none;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); display: none; z-index: 1000;
+            transform: translate(-50%, -100%); margin-top: -15px; min-width: 180px;
+        }
+        #tooltip::after {
+            content: ''; position: absolute; top: 100%; left: 50%; margin-left: -6px;
+            border-width: 6px; border-style: solid; border-color: rgba(17, 24, 39, 0.95) transparent transparent transparent;
+        }
+        .tt-header { font-weight: 700; font-size: 0.95rem; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid #374151; }
+        .tt-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+        .tt-value { font-family: monospace; color: #93c5fd; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card" style="zoom: 0.65;">
+        <h1>Bağlantı Katmanı: CSMA/CD Binary Exponential Backoff Simülatörü</h1>
+        <p style="color: var(--text-muted); margin-bottom: 20px;"></p>
+
+        <div class="table-container">
+            <table id="nodesTable">
+                <thead>
+                    <tr>
+                        <th style="width: 20%">Cihaz Adı</th>
+                        <th style="width: 25%">Frame Boyutu (Byte)</th>
+                        <th style="width: 45%">Backoff Ceza Katsayıları (Virgülle)</th>
+                        <th style="width: 10%">Aksiyon</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="addRow()">+ Yeni Cihaz</button>
+            <button class="btn btn-start" onclick="doRunSimulation()">Simülasyonu Çalıştır</button>
+        </div>
+    </div>
+
+    <div class="card" id="resultsSection" style="display: none;">
+        <h2>Simülasyon Çıktısı ve Zaman Çizelgesi</h2>
+
+        <div class="summary-grid" id="summaryBox"></div>
+
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 15px;">
+            <div class="legend" style="flex-wrap: wrap; gap: 10px; margin-bottom: 0;">
+                <div class="legend-item"><div class="legend-color" style="background: #10b981"></div> İletim (TX)</div>
+                <div class="legend-item"><div class="legend-color" style="background: #ef4444"></div> Çarpışma</div>
+                <div class="legend-item"><div class="legend-color" style="background: #dc2626"></div> Jam Sinyali</div>
+                <div class="legend-item"><div class="legend-color" style="background: #f59e0b"></div> Ceza (Backoff)</div>
+                <div class="legend-item"><div class="legend-color" style="background: #9ca3af"></div> Wait/Dalga Yayılımı</div>
+                <div class="legend-item"><div class="legend-color" style="background: #3b82f6"></div> IFG</div>
+            </div>
+            <button class="btn btn-export" onclick="exportPng()">&#11015; PNG Olarak Kaydet</button>
+        </div>
+
+        <div class="canvas-wrapper">
+            <canvas id="timelineCanvas"></canvas>
+        </div>
+    </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script src="js/simulation.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
