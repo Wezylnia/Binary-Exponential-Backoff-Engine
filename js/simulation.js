@@ -133,7 +133,37 @@ function runSimulation(request) {
 
     function doTx(n) {
         let txS = _t, txE = R(_t + n.txDur);
+        let tauBoundary = R(txS - IFG_DUR + TAU);
 
+        // TAU check: find pool entries finishing backoff before they can sense our TX
+        let invisibleEntries = _pool.filter(p => {
+            let boEnd = R(p.endTime);
+            return boEnd >= txS - EPS && boEnd < tauBoundary - EPS;
+        });
+
+        // Among invisible, which ones finish IFG before sensing TX? → collision
+        let collidingEntries = invisibleEntries.filter(p => {
+            let boEnd = R(p.endTime);
+            return R(boEnd + IFG_DUR) < tauBoundary - EPS;
+        });
+
+        if (collidingEntries.length > 0) {
+            // TX becomes a collision - these nodes can't sense our TX, do IFG, then attempt
+            doTxCollision(n, txS, collidingEntries, invisibleEntries);
+            return;
+        }
+
+        // Handle invisible entries that detect TX during IFG → WAITING (no collision)
+        invisibleEntries.forEach(p => {
+            _pool.splice(_pool.indexOf(p), 1);
+            endPh(p.node, R(p.endTime));
+            let boEnd = R(p.endTime);
+            addEv(p.node.name, "IFG", boEnd, R(boEnd + IFG_DUR));
+            ph(p.node, "WAITING", R(boEnd + IFG_DUR));
+            _waiting.push(p.node);
+        });
+
+        // Normal TX path (remaining pool entries can sense TX)
         movePoolFinishedToWaiting(txS, txE);
 
         ph(n, "TX", txS); endPh(n, txE);
@@ -165,6 +195,93 @@ function runSimulation(request) {
         } else {
             _t = ifgE;
         }
+    }
+
+    function doTxCollision(n, txS, collidingEntries, invisibleEntries) {
+        let cS = txS;
+        let cE = R(cS + COL_DUR);
+        let jE = R(cE + JAM_DUR);
+
+        let lateJoiners = [];
+
+        // Colliding entries: IFG then COLLISION
+        collidingEntries.forEach(p => {
+            _pool.splice(_pool.indexOf(p), 1);
+            endPh(p.node, R(p.endTime));
+            let boEnd = R(p.endTime);
+            let ifgELocal = R(boEnd + IFG_DUR);
+            addEv(p.node.name, "IFG", boEnd, ifgELocal);
+            if (cE - ifgELocal > EPS) {
+                addEv(p.node.name, "COLLISION", ifgELocal, cE);
+            }
+            lateJoiners.push(p.node);
+        });
+
+        // Invisible entries that detect TX during IFG → WAITING
+        let ifgWaitEntries = invisibleEntries.filter(p => !collidingEntries.includes(p));
+        ifgWaitEntries.forEach(p => {
+            if (_pool.indexOf(p) !== -1) {
+                _pool.splice(_pool.indexOf(p), 1);
+                endPh(p.node, R(p.endTime));
+                let boEnd = R(p.endTime);
+                addEv(p.node.name, "IFG", boEnd, R(boEnd + IFG_DUR));
+                ph(p.node, "WAITING", R(boEnd + IFG_DUR));
+                _waiting.push(p.node);
+            }
+        });
+
+        // N gets COLLISION (TX attempt failed)
+        ph(n, "COLLISION", cS); endPh(n, cE);
+
+        // Check for further late joiners in pool during collision window
+        let furtherLateJoiners = [];
+        let toRemove = [];
+        _pool.forEach(p => {
+            let boEnd = R(p.endTime);
+            if (boEnd >= cS - EPS && boEnd < cE - EPS && boEnd - cS < TAU - EPS) {
+                toRemove.push(p);
+                endPh(p.node, boEnd);
+                let ifgELocal = R(boEnd + IFG_DUR);
+                addEv(p.node.name, "IFG", boEnd, ifgELocal);
+                if (cE - ifgELocal > EPS) {
+                    addEv(p.node.name, "COLLISION", ifgELocal, cE);
+                }
+                furtherLateJoiners.push(p.node);
+            }
+        });
+        toRemove.forEach(p => _pool.splice(_pool.indexOf(p), 1));
+
+        // Move remaining finished pool entries to WAITING
+        movePoolFinishedToWaiting(cS, jE);
+
+        // All colliders
+        let allColliders = [n, ...lateJoiners, ...furtherLateJoiners];
+
+        // JAM
+        allColliders.forEach(nd => {
+            ph(nd, "JAM", cE); endPh(nd, jE);
+        });
+
+        _t = jE;
+
+        // Backoff
+        allColliders.forEach(nd => {
+            nd.penSlots = nd.nextPen();
+            nd.penDur = R(nd.penSlots * SLOT);
+            nd.bi++;
+        });
+
+        allColliders.forEach(nd => {
+            let endTime = R(jE + nd.penDur);
+            if (nd.penDur <= EPS) {
+                _waiting.push(nd);
+            } else {
+                _pool.push(new PoolEntry(nd, jE, endTime));
+                ph(nd, "BACKOFF", jE, "r=" + nd.penSlots);
+            }
+        });
+
+        _next = () => next();
     }
 
     function doCollision(g) {
